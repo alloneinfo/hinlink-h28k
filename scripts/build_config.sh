@@ -6,6 +6,7 @@ fail() { echo "error: $*" >&2; exit 1; }
 
 load_config() {
   local file="$1" key value octet
+  local -a octets
   lan_ip=""
   password=""
   default_theme=""
@@ -28,6 +29,7 @@ load_config() {
   for octet in "${octets[@]}"; do
     (( 10#$octet <= 255 )) || fail "invalid lan_ip: $lan_ip"
   done
+  [[ -n "$password" ]] || fail "password is required"
   [[ -z "$default_theme" || "$default_theme" =~ ^[A-Za-z0-9_-]+$ ]] ||
     fail "invalid default_theme: $default_theme"
   [[ "$check_official_abi" == true || "$check_official_abi" == false ]] ||
@@ -57,11 +59,9 @@ apply_device_config() {
       "$source_dir/feeds/luci/modules/luci-base/root/etc/config/luci"
   fi
 
-  if [[ -n "$password" ]]; then
-    shadow="$source_dir/package/base-files/files/etc/shadow"
-    password_hash="$(printf '%s\n' "$password" | openssl passwd -6 -stdin)"
-    sed -i "s|^root:[^:]*:|root:${password_hash}:|" "$shadow"
-  fi
+  shadow="$source_dir/package/base-files/files/etc/shadow"
+  password_hash="$(printf '%s\n' "$password" | openssl passwd -6 -stdin)"
+  sed -i "s|^root:[^:]*:|root:${password_hash}:|" "$shadow"
 }
 
 prepare() {
@@ -69,6 +69,10 @@ prepare() {
   load_config "$config"
   clone_packages "$source_dir" "$packages"
   apply_device_config "$source_dir"
+  if [[ "$check_official_abi" == true ]]; then
+    sed -i 's/CONFIG_BUILDBOT/CONFIG_ALL_KMODS/g' "$source_dir/include/feeds.mk"
+    test "$(grep -c 'CONFIG_ALL_KMODS' "$source_dir/include/feeds.mk")" -eq 2
+  fi
 }
 
 check_abi() {
@@ -101,15 +105,14 @@ check_abi() {
   else
     echo 'official ABI check disabled'
   fi
-  [[ -z "$github_env" ]] || echo "KERNEL_ABI=$built_abi" >> "$github_env"
+  if [[ -n "$github_env" ]]; then
+    echo "KERNEL_ABI=$built_abi" >> "$github_env"
+    echo "FIRMWARE_LAN_IP=$lan_ip" >> "$github_env"
+    echo "FIRMWARE_PASSWORD=$password" >> "$github_env"
+  fi
 }
 
 case "${1:-}" in
-  validate)
-    load_config "$2"
-    clone_count="$(grep -cEv '^[[:space:]]*(#|$)' "$3" || true)"
-    echo "lan_ip=$lan_ip password=$([[ -n "$password" ]] && echo set || echo unchanged) theme=${default_theme:-unchanged} abi=$check_official_abi git_packages=$clone_count"
-    ;;
   prepare) prepare "$2" "$3" "$4" ;;
   check-abi) check_abi "$2" "$3" "$4" "$5" "${6:-}" ;;
   *) fail "unknown command: ${1:-}" ;;
