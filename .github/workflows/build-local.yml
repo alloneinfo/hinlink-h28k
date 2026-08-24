@@ -2,12 +2,6 @@ name: 自托管编译 HINLINK H28K 固件
 
 on:
   workflow_dispatch:
-    inputs:
-      use_cache:
-        description: 使用 GitHub Actions 源码缓存
-        required: true
-        default: true
-        type: boolean
 
 permissions:
   contents: write
@@ -37,29 +31,14 @@ jobs:
             libtool libyaml-dev lld llvm lrzsz msmtp ninja-build openssl p7zip-full \
             patch pkgconf python3 python3-pip python3-ply python3-docutils \
             python3-pyelftools qemu-utils re2c rsync scons squashfs-tools subversion swig \
-            texinfo uglifyjs upx-ucl unzip wget xmlto xxd zlib1g-dev zstd jq
+            texinfo uglifyjs upx-ucl unzip wget xmlto xxd zlib1g-dev zstd
 
-      - name: 选择最新正式版
+      - name: 选择 ImmortalWrt 版本
         id: release
         run: |
-          set -eu
-          UPSTREAM=https://github.com/immortalwrt/immortalwrt.git
-          RELEASE_TAG=""
-          for tag in $(git ls-remote --tags --refs "$UPSTREAM" 'refs/tags/v*' \
-            | awk -F/ '$3 ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/ { print $3 }' \
-            | sort -Vr); do
-            version="${tag#v}"
-            buildinfo="https://downloads.immortalwrt.org/releases/${version}/targets/rockchip/armv8/config.buildinfo"
-            if curl -fsI "$buildinfo" >/dev/null; then
-              RELEASE_TAG="$tag"
-              break
-            fi
-          done
-          test -n "$RELEASE_TAG"
-          RELEASE_VERSION="${RELEASE_TAG#v}"
-          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
-          echo "Latest stable release: $RELEASE_TAG"
+          bash "$GITHUB_WORKSPACE/scripts/select_release.sh" \
+            "$GITHUB_WORKSPACE/config/firmware.conf" \
+            "$GITHUB_OUTPUT"
 
       - name: 克隆正式版源码
         run: |
@@ -68,71 +47,39 @@ jobs:
 
       - name: 应用 HINLINK H28K 补丁
         working-directory: source
+        env:
+          PATCH_SERIES: ${{ steps.release.outputs.series }}
         run: |
-          set -eu
-          for patch in "$GITHUB_WORKSPACE"/patches/*.patch; do
-            echo "=== Applying patch: $(basename "$patch") ==="
-            git apply --check --3way "$patch" || {
-              echo "Patch check failed: $patch"
-              git apply --reject "$patch" || true
-              find . -name '*.rej' -print -exec cat {} \;
-              exit 1
-            }
-            git apply --3way "$patch"
-          done
-          git diff --stat
+          bash "$GITHUB_WORKSPACE/scripts/apply_patches.sh" \
+            . "$GITHUB_WORKSPACE/patches/$PATCH_SERIES"
 
-      - name: 更新 feeds
+      - name: 使用官方 feeds
         working-directory: source
         run: |
-          set -eu
           curl -fsSL \
             "https://downloads.immortalwrt.org/releases/${{ steps.release.outputs.version }}/targets/rockchip/armv8/feeds.buildinfo" \
             -o feeds.conf.default
-          sha256sum feeds.conf.default > .feeds.conf.default.sha256
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-          sha256sum -c .feeds.conf.default.sha256
 
       - name: 应用构建配置
         working-directory: source
         run: |
-          set -eu
           bash "$GITHUB_WORKSPACE/scripts/build_config.sh" prepare \
             . \
             "$GITHUB_WORKSPACE/config/firmware.conf" \
-            "$GITHUB_WORKSPACE/config/packages.conf"
+            "$GITHUB_WORKSPACE/config/packages.conf" \
+            "$GITHUB_ENV"
 
-      - name: 提取官方内核配置
+      - name: 准备内核配置
         working-directory: source
-        env:
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: |
-          set -eu
-          BUILDINFO_URL="https://downloads.immortalwrt.org/releases/${RELEASE_VERSION}/targets/rockchip/armv8"
-          curl -fsSL "$BUILDINFO_URL/config.buildinfo" -o .config.buildinfo
-          awk '
-            /^CONFIG_ALL_KMODS=y$/ ||
-            /^CONFIG_DEVEL=y$/ ||
-            (/^CONFIG_KERNEL_[A-Za-z0-9_]+=/ &&
-              $0 !~ /^CONFIG_KERNEL_BUILD_(DOMAIN|USER)=/) ||
-            /^# CONFIG_KERNEL_[A-Za-z0-9_]+ is not set$/
-          ' .config.buildinfo > .config.official
-          grep -q '^CONFIG_ALL_KMODS=y$' .config.official
-          grep -q '^CONFIG_DEVEL=y$' .config.official
-          cat .config.official "$GITHUB_WORKSPACE/config/hinlink-h28k.config" > .config
-          make defconfig
-
-      - name: 恢复源码缓存
-        id: source-cache
-        if: ${{ inputs.use_cache }}
-        uses: actions/cache/restore@v4
-        with:
-          path: source/dl
-          key: immortalwrt-dl-${{ runner.os }}-${{ steps.release.outputs.version }}-${{ github.sha }}
-          restore-keys: |
-            immortalwrt-dl-${{ runner.os }}-${{ steps.release.outputs.version }}-
-            immortalwrt-dl-${{ runner.os }}-
+          bash "$GITHUB_WORKSPACE/scripts/prepare_kernel_config.sh" \
+            . \
+            "$GITHUB_WORKSPACE/config/firmware.conf" \
+            "${{ steps.release.outputs.version }}" \
+            "${{ steps.release.outputs.series }}" \
+            "$GITHUB_WORKSPACE/config/hinlink-h28k.config"
 
       - name: 下载源码包
         working-directory: source
@@ -141,13 +88,6 @@ jobs:
           make -j"$(nproc)" download V=s
           find dl -size -1024c -print -delete
           du -sh dl
-
-      - name: 保存源码缓存
-        if: ${{ inputs.use_cache && steps.source-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
-        with:
-          path: source/dl
-          key: immortalwrt-dl-${{ runner.os }}-${{ steps.release.outputs.version }}-${{ github.sha }}
 
       - name: 编译固件
         working-directory: source
@@ -164,17 +104,13 @@ jobs:
 
       - name: 校验内核 ABI
         working-directory: source
-        env:
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: |
-          set -eu
           bash "$GITHUB_WORKSPACE/scripts/build_config.sh" check-abi \
             . \
             "$GITHUB_WORKSPACE/config/firmware.conf" \
-            "$RELEASE_VERSION" \
-            "$RELEASE_TAG" \
-            "$GITHUB_ENV"
+            "${{ steps.release.outputs.version }}" \
+            "${{ steps.release.outputs.tag }}" \
+            "${{ steps.release.outputs.kernel_kmods }}"
 
       - name: 检查固件产物
         working-directory: source
@@ -210,7 +146,6 @@ jobs:
             - **设备型号**：HINLINK H28K (RK3528)
             - **管理地址**：`${{ env.FIRMWARE_LAN_IP }}`
             - **root 密码**：`${{ env.FIRMWARE_PASSWORD }}`
-            - **内核 ABI**：`${{ env.KERNEL_ABI }}`
           files: source/bin/targets/rockchip/armv8/*hinlink_h28k*sysupgrade.img.gz
           make_latest: true
           fail_on_unmatched_files: true

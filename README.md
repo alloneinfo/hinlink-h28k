@@ -1,45 +1,63 @@
-# HINLINK H28K 固件
+# HINLINK H28K ImmortalWrt 固件
 
-本仓库用于每周自动编译 ImmortalWrt HINLINK H28K 固件（RK3528）。
+本仓库用于自动编译 HINLINK H28K（Rockchip RK3528）固件。项目只保存编译配置、构建脚本和板级补丁，不包含 ImmortalWrt 上游源码。
 
-> 本项目仅供个人使用与配置留档，不面向通用环境，也不提供技术支持；请自行评估适配性。
+> 仅供个人使用和配置留档，请自行确认硬件适配性。
 
-## 补丁说明
+## 支持版本
 
-| 补丁 | 说明 |
+| ImmortalWrt 系列 | 补丁目录 | 内容 |
+| --- | --- | --- |
+| 24.10.x | `patches/24.10/` | RK3528 内核回移 + H28K 板级支持 + U-Boot 2025.10 |
+| 25.12.x | `patches/25.12/` | 5 个 H28K 板级补丁 |
+
+补丁只会应用所选版本目录中的 `*.patch` 文件，并按文件名字典序执行。补丁文件名前的编号就是应用顺序。
+
+**已测试版本**: 24.10.5, 24.10.6, 25.12.1
+
+## 版本配置
+
+编辑 [config/firmware.conf](config/firmware.conf) 中的 `release_version`。填写系列号会自动选择该系列最新正式版：
+
+```ini
+# 自动选择最新 25.12.x
+release_version=25.12
+```
+
+填写完整版本号则固定构建指定版本：
+
+```ini
+release_version=25.12.1
+```
+
+同一文件还控制 LAN 地址、root 密码、默认 LuCI 主题和官方 ABI 校验：
+
+```ini
+lan_ip=192.168.0.2
+password=your-password
+default_theme=fluent
+check_official_abi=true
+```
+
+`config/packages.conf` 每行定义一个额外的 `git clone` 软件包；`config/hinlink-h28k.config` 保存目标、软件包和分区配置。
+构建时使用所选正式版 `feeds.buildinfo` 锁定的官方 feeds 提交。
+
+## 构建脚本
+
+| 脚本 | 职责 |
 | --- | --- |
-| `0010-rockchip-add-HINLINK-H28K-U-Boot-support.patch` | 添加 U-Boot 目标、H28K DTS、U-Boot DTSI 和 defconfig。 |
-| `0020-rockchip-add-HINLINK-H28K-device-tree.patch` | 添加 Linux H28K 设备树和系统 LED 别名。 |
-| `0030-rockchip-add-HINLINK-H28K-board-defaults.patch` | 添加 LED 默认值、LAN/WAN 分配、MAC 地址生成和 IRQ affinity。 |
-| `0040-rockchip-add-HINLINK-H28K-image.patch` | 添加 `hinlink_h28k` 固件设备配置。 |
-| `0050-rockchip-configure-HINLINK-H28K-RJ45-LEDs.patch` | 配置两个 RJ45 接口的链路灯和活动灯。 |
+| `scripts/config.sh` | 共享配置读取和校验 |
+| `scripts/select_release.sh` | 选择 ImmortalWrt 精确版本或系列最新版 |
+| `scripts/apply_patches.sh` | 应用版本目录中的补丁 |
+| `scripts/prepare_kernel_config.sh` | 提取官方内核配置；24.10 计算 ABI 时排除 RK3528 时钟选项 |
+| `scripts/build_config.sh` | 注入固件参数、启用官方 kmod 源并校验 ABI |
 
-## 自动编译
+## 默认组件
 
-GitHub Actions 每周自动运行一次，也可以在 Actions 页面手动触发。每次构建会：
-
-1. 自动选择 ImmortalWrt 最新正式版 `vX.Y.Z` 标签。
-2. 使用对应正式版的官方 `config.buildinfo`。
-3. 应用 HINLINK H28K 补丁。
-4. 加载固件参数和额外 Git 软件包。
-5. 编译完整固件并上传到 Artifacts 和 Releases。
-
-## 构建配置
-
-所有可调整的构建配置放在 `config/`：
-
-| 文件 | 用途 |
-| --- | --- |
-| `firmware.conf` | 设置 LAN 地址、root 密码、默认主题和 ABI 校验开关。 |
-| `packages.conf` | 每行一条完整的 `git clone` 命令。 |
-| `hinlink-h28k.config` | H28K 目标、软件包和分区配置。 |
-
-## 默认包含
-
-- Fluent LuCI 主题：`luci-theme-fluent`
-- Nikki：`luci-app-nikki`
-- MT7921U USB 无线网卡驱动：`kmod-mt7921u`
-- OpenSSH SFTP 服务：`openssh-sftp-server`
+- `luci-theme-fluent`
+- `luci-app-nikki`
+- `kmod-mt7921u`
+- `openssh-sftp-server`
 
 ## 设备信息
 

@@ -2,10 +2,7 @@ diff --git a/package/boot/uboot-rockchip/Makefile b/package/boot/uboot-rockchip/
 index 1633d1e..0442a83 100644
 --- a/package/boot/uboot-rockchip/Makefile
 +++ b/package/boot/uboot-rockchip/Makefile
-@@ -191,6 +191,13 @@ define U-Boot/rk3528/Default
-   TPL:=$(RK3528_TPL)
- endef
- 
+@@ -217,3 +217,10 @@
 +define U-Boot/hinlink-h28k-rk3528
 +  $(U-Boot/rk3528/Default)
 +  NAME:=HINLINK H28K
@@ -13,17 +10,14 @@ index 1633d1e..0442a83 100644
 +    hinlink_h28k
 +endef
 +
- define U-Boot/mangopi-m28c-rk3528
-   $(U-Boot/rk3528/Default)
-   NAME:=MangoPi M28C
-@@ -537,6 +544,7 @@ UBOOT_TARGETS := \
-   roc-cc-rk3328 \
-   rock64-rk3328 \
-   rock-pi-e-rk3328 \
+ # RK3566 boards
+ 
+ define U-Boot/rk3566/Default
+@@ -545,3 +552,4 @@ UBOOT_TARGETS := \
 +  hinlink-h28k-rk3528 \
-   mangopi-m28c-rk3528 \
-   mangopi-m28k-rk3528 \
-   radxa-e20c-rk3528 \
+   nanopi-r3s-rk3566 \
+   radxa-cm3-io-rk3566 \
+   radxa-zero-3-rk3566 \
 diff --git a/package/boot/uboot-rockchip/src/arch/arm/dts/rk3528-hinlink-h28k-u-boot.dtsi b/package/boot/uboot-rockchip/src/arch/arm/dts/rk3528-hinlink-h28k-u-boot.dtsi
 new file mode 100644
 index 0000000..3e2fbd8
